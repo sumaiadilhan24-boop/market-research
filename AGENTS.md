@@ -18,7 +18,7 @@ This document serves as the single source of truth for AI agents and human devel
 ## 2. Directory Structure
 
 ```
-sale-cat/
+market-research/
 ├── PRD.md                         # Product Requirements Document
 ├── AGENTS.md                      # Agent & Developer Operating Instructions
 ├── ARCHITECTURE.md                # System Architecture & Data Model

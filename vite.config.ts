@@ -43,6 +43,7 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom'],
           supabase: ['@supabase/supabase-js'],
+          localdb: ['dexie'],
           icons: ['lucide-react'],
         },
       },

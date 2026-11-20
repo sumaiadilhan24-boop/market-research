@@ -1,5 +1,6 @@
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase'
 import { demoSnapshot } from '../lib/seed'
+import { localDb } from '../lib/localDb'
 import type {
   CustomerInteraction,
   DataSnapshot,
@@ -12,11 +13,10 @@ import type {
   VisitInput,
 } from '../types'
 
-export type DataMode = 'supabase' | 'demo'
+/** Supabase when configured, otherwise a fully local IndexedDB database. */
+export type DataMode = 'supabase' | 'local'
 
 type Row = Record<string, unknown>
-
-const DEMO_STORAGE_KEY = 'market-research.demo.v3'
 
 const PRODUCT_COLUMNS: Record<string, string> = {
   id: 'id',
@@ -127,43 +127,6 @@ function fromInteractionRow(row: Row): CustomerInteraction {
   }
 }
 
-function loadDemo(): DataSnapshot {
-  try {
-    const raw = localStorage.getItem(DEMO_STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as DataSnapshot
-      if (
-        Array.isArray(parsed.products) &&
-        Array.isArray(parsed.visits) &&
-        Array.isArray(parsed.interactions)
-      ) {
-        return parsed
-      }
-    }
-  } catch {
-    /* corrupted or unavailable storage — fall back to fresh sample data */
-  }
-  const seed = demoSnapshot()
-  try {
-    localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(seed))
-  } catch {
-    /* storage may be disabled; in-memory seed still works */
-  }
-  return seed
-}
-
-function saveDemo(snapshot: DataSnapshot): void {
-  try {
-    localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(snapshot))
-  } catch {
-    /* in-memory state remains usable */
-  }
-}
-
-function nextId(records: Array<{ id?: number }>): number {
-  return records.reduce((max, record) => Math.max(max, record.id ?? 0), 0) + 1
-}
-
 function mergePatch<T extends { id?: number }>(record: T, patch: Partial<T>): T {
   const next: T = { ...record, ...patch }
   for (const key of Object.keys(patch) as Array<keyof T>) {
@@ -173,11 +136,11 @@ function mergePatch<T extends { id?: number }>(record: T, patch: Partial<T>): T 
 }
 
 /**
- * Single entry point for every read/write. All components use this service,
- * so switching between Supabase and demo mode requires no UI changes.
+ * Single entry point for every read/write. Components never need to know
+ * whether records live in Supabase or in the browser's IndexedDB.
  */
 class DataService {
-  readonly mode: DataMode = isSupabaseConfigured ? 'supabase' : 'demo'
+  readonly mode: DataMode = isSupabaseConfigured ? 'supabase' : 'local'
   private cache: DataSnapshot = { products: [], visits: [], interactions: [] }
   private ready = false
   private listeners = new Set<() => void>()
@@ -199,12 +162,6 @@ class DataService {
 
   private emit(): void {
     this.listeners.forEach((listener) => listener())
-  }
-
-  private commitDemo(next: DataSnapshot): void {
-    this.cache = next
-    saveDemo(next)
-    this.emit()
   }
 
   /** Apply backend-confirmed rows directly — avoids re-fetching all tables per write. */
@@ -230,13 +187,14 @@ class DataService {
         interactions: (interactions.data ?? []).map((row) => fromInteractionRow(row as Row)),
       }
     } else {
-      this.cache = loadDemo()
+      await localDb.seedOnce(demoSnapshot())
+      this.cache = await localDb.snapshot()
     }
     this.ready = true
     this.emit()
   }
 
-  /** Health probe used by NetworkContext (Supabase query or demo origin check). */
+  /** Health probe used by NetworkContext (Supabase query or local origin check). */
   async ping(): Promise<boolean> {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return false
     if (this.mode === 'supabase') {
@@ -283,9 +241,11 @@ class DataService {
       })
       return created
     }
-    const product = { ...record, id: nextId(this.cache.products) }
-    this.commitDemo({ ...this.cache, products: [...this.cache.products, product] })
-    return product
+    const created = await localDb.addProduct(record)
+    this.commitCache({
+      products: [created, ...this.cache.products.filter((product) => product.id !== created.id)],
+    })
+    return created
   }
 
   async updateProduct(id: number, patch: Partial<Product>): Promise<void> {
@@ -304,11 +264,12 @@ class DataService {
       })
       return
     }
-    this.commitDemo({
-      ...this.cache,
-      products: this.cache.products.map((product) =>
-        product.id === id ? mergePatch(product, changes) : product,
-      ),
+    const current = this.cache.products.find((product) => product.id === id)
+    if (!current) return
+    const updated = mergePatch(current, changes)
+    await localDb.putProduct(updated)
+    this.commitCache({
+      products: this.cache.products.map((product) => (product.id === id ? updated : product)),
     })
   }
 
@@ -316,15 +277,11 @@ class DataService {
     if (this.mode === 'supabase') {
       const { error } = await getSupabase().from('products').delete().eq('id', id)
       if (error) throw error
-      this.commitCache({
-        products: this.cache.products.filter((product) => product.id !== id),
-        interactions: this.cache.interactions.filter((interaction) => interaction.productId !== id),
-      })
-      return
+    } else {
+      await localDb.deleteProduct(id)
     }
-    this.commitDemo({
+    this.commitCache({
       products: this.cache.products.filter((product) => product.id !== id),
-      visits: this.cache.visits,
       interactions: this.cache.interactions.filter((interaction) => interaction.productId !== id),
     })
   }
@@ -333,25 +290,26 @@ class DataService {
 
   async createVisit(input: VisitInput): Promise<Visit> {
     const record: Visit = { ...input, id: undefined, createdAt: new Date().toISOString() }
+    let created: Visit
     if (this.mode === 'supabase') {
       const client = getSupabase()
       const { id: _id, ...rest } = record
       const { data, error } = await client.from('visits').insert(toRow(rest, VISIT_COLUMNS)).select().single()
       if (error) throw error
-      const created = fromVisitRow(data as Row)
-      this.commitCache({
-        visits: [created, ...this.cache.visits.filter((visit) => visit.id !== created.id)].sort((a, b) =>
-          b.visitDate.localeCompare(a.visitDate),
-        ),
-      })
-      return created
+      created = fromVisitRow(data as Row)
+    } else {
+      created = await localDb.addVisit(record)
     }
-    const visit = { ...record, id: nextId(this.cache.visits) }
-    this.commitDemo({ ...this.cache, visits: [...this.cache.visits, visit] })
-    return visit
+    this.commitCache({
+      visits: [created, ...this.cache.visits.filter((visit) => visit.id !== created.id)].sort((a, b) =>
+        b.visitDate.localeCompare(a.visitDate),
+      ),
+    })
+    return created
   }
 
   async updateVisit(id: number, patch: Partial<Visit>): Promise<void> {
+    let updated: Visit
     if (this.mode === 'supabase') {
       const { data, error } = await getSupabase()
         .from('visits')
@@ -360,15 +318,15 @@ class DataService {
         .select()
         .single()
       if (error) throw error
-      const updated = fromVisitRow(data as Row)
-      this.commitCache({
-        visits: this.cache.visits.map((visit) => (visit.id === id ? updated : visit)),
-      })
-      return
+      updated = fromVisitRow(data as Row)
+    } else {
+      const current = this.cache.visits.find((visit) => visit.id === id)
+      if (!current) return
+      updated = mergePatch(current, patch)
+      await localDb.putVisit(updated)
     }
-    this.commitDemo({
-      ...this.cache,
-      visits: this.cache.visits.map((visit) => (visit.id === id ? mergePatch(visit, patch) : visit)),
+    this.commitCache({
+      visits: this.cache.visits.map((visit) => (visit.id === id ? updated : visit)),
     })
   }
 
@@ -376,14 +334,10 @@ class DataService {
     if (this.mode === 'supabase') {
       const { error } = await getSupabase().from('visits').delete().eq('id', id)
       if (error) throw error
-      this.commitCache({
-        visits: this.cache.visits.filter((visit) => visit.id !== id),
-        interactions: this.cache.interactions.filter((interaction) => interaction.visitId !== id),
-      })
-      return
+    } else {
+      await localDb.deleteVisit(id)
     }
-    this.commitDemo({
-      products: this.cache.products,
+    this.commitCache({
       visits: this.cache.visits.filter((visit) => visit.id !== id),
       interactions: this.cache.interactions.filter((interaction) => interaction.visitId !== id),
     })
@@ -397,6 +351,7 @@ class DataService {
       id: undefined,
       createdAt: new Date().toISOString(),
     }
+    let created: CustomerInteraction
     if (this.mode === 'supabase') {
       const client = getSupabase()
       const { id: _id, ...rest } = record
@@ -406,31 +361,24 @@ class DataService {
         .select()
         .single()
       if (error) throw error
-      const created = fromInteractionRow(data as Row)
-      this.commitCache({
-        interactions: [created, ...this.cache.interactions.filter((item) => item.id !== created.id)],
-      })
-      return created
+      created = fromInteractionRow(data as Row)
+    } else {
+      created = await localDb.addInteraction(record)
     }
-    const interaction = { ...record, id: nextId(this.cache.interactions) }
-    this.commitDemo({
-      ...this.cache,
-      interactions: [...this.cache.interactions, interaction],
+    this.commitCache({
+      interactions: [created, ...this.cache.interactions.filter((item) => item.id !== created.id)],
     })
-    return interaction
+    return created
   }
 
   async deleteInteraction(id: number): Promise<void> {
     if (this.mode === 'supabase') {
       const { error } = await getSupabase().from('interactions').delete().eq('id', id)
       if (error) throw error
-      this.commitCache({
-        interactions: this.cache.interactions.filter((interaction) => interaction.id !== id),
-      })
-      return
+    } else {
+      await localDb.deleteInteraction(id)
     }
-    this.commitDemo({
-      ...this.cache,
+    this.commitCache({
       interactions: this.cache.interactions.filter((interaction) => interaction.id !== id),
     })
   }
@@ -446,7 +394,8 @@ class DataService {
       await this.refresh()
       return
     }
-    this.commitDemo({ products: [], visits: [], interactions: [] })
+    await localDb.clearAll()
+    this.commitCache({ products: [], visits: [], interactions: [] })
   }
 
   async resetToSeed(): Promise<void> {
@@ -470,7 +419,8 @@ class DataService {
       await this.refresh()
       return
     }
-    this.commitDemo(seed)
+    await localDb.replaceAll(seed)
+    this.commitCache(seed)
   }
 }
 

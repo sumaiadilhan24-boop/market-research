@@ -2,7 +2,7 @@
 
 Mobile-first field sales & market research PWA. React + TypeScript + Vite + Tailwind, with **Supabase (PostgreSQL)** as the cloud database and **Vercel** for free static hosting.
 
-## Quick start (demo mode — no setup required)
+## Quick start (local IndexedDB mode — no setup required)
 
 ```bash
 export PATH="/home/ashfatul/.config/nvm/versions/node/v24.22.3/bin:$PATH"
@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-With no Supabase credentials, Market Research runs in **demo mode**: sample products, visits and inquiries are preloaded, and your edits persist in the browser's local storage. This lets you try every feature immediately.
+With no Supabase credentials, Market Research runs fully offline-capable in **local mode**: sample products, visits and inquiries are seeded once into IndexedDB (database `MarketResearchDB`), and every edit is written straight back to it. Data survives page reloads, browser restarts and PWA launches — no account or server needed.
 
 ## Connect Supabase
 

@@ -98,12 +98,12 @@ export function DataPanel() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-bold text-slate-900">
-              {mode === 'supabase' ? 'Supabase connected' : 'Demo mode'}
+              {mode === 'supabase' ? 'Supabase connected' : 'Local storage (IndexedDB)'}
             </p>
             <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
               {mode === 'supabase'
                 ? 'Records are saved directly to your Supabase PostgreSQL database.'
-                : 'No credentials configured. Sample data is stored locally so you can test everything instantly.'}
+                : 'No Supabase credentials found. Everything is saved in this browser with IndexedDB — records survive reloads, restarts and app launches.'}
             </p>
           </div>
         </div>
@@ -124,9 +124,9 @@ export function DataPanel() {
         )}
       </Card>
 
-      {mode === 'demo' && (
+      {mode === 'local' && (
         <Card className="border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-bold text-amber-700">Connect your own database</p>
+          <p className="text-sm font-bold text-amber-700">Switch to Supabase (optional)</p>
           <ol className="mt-2 space-y-1.5 text-xs leading-relaxed text-slate-600">
             <li>1. Copy <code className="break-all text-amber-700">.env.example</code> to <code className="break-all text-amber-700">.env.local</code>.</li>
             <li>2. Add your <code className="break-all text-amber-700">VITE_SUPABASE_URL</code> and anon key.</li>
