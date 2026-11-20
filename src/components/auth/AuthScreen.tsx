@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import {
   AlertCircle,
-  Cat,
+  BarChart3,
   CheckCircle2,
   KeyRound,
   Loader2,
@@ -9,15 +9,20 @@ import {
   LogIn,
   Mail,
   UserPlus,
+  WifiOff,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
+import { useNetwork } from '../../context/NetworkContext'
 import { haptic } from '../../utils'
 
 export function AuthScreen() {
-  const { signIn, signUp, resetPassword } = useAuth()
+  const { signIn, signUp, resetPassword, isRecovery, updatePassword, cancelRecovery } = useAuth()
+  const { isOnline } = useNetwork()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -78,12 +83,121 @@ export function AuthScreen() {
     }
   }
 
+  const submitRecovery = async (event: FormEvent) => {
+    event.preventDefault()
+    setError(null)
+    setNotice(null)
+    if (newPassword.length < 6) {
+      setError('Use at least 6 characters.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+    setBusy(true)
+    try {
+      await updatePassword(newPassword)
+      setNotice('Password updated — you can now sign in with your new password.')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not update password.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const offlineBanner = !isOnline ? (
+    <div className="mb-4 flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+      <WifiOff size={16} className="shrink-0" /> You&apos;re offline — reconnect to continue.
+    </div>
+  ) : null
+
+  if (isRecovery) {
+    return (
+      <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 px-5 py-10">
+        <form
+          onSubmit={(event) => void submitRecovery(event)}
+          className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-5 shadow-xl"
+        >
+          <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600 text-white">
+            <KeyRound size={24} />
+          </span>
+          <h1 className="text-lg font-bold text-slate-900">Set a new password</h1>
+          <p className="mt-1 text-xs text-slate-600">
+            Choose a new password for your Market Research account.
+          </p>
+
+          {offlineBanner}
+          {error && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-xs text-rose-700">
+              <AlertCircle size={16} className="mt-0.5 shrink-0" /> {error}
+            </div>
+          )}
+          {notice && (
+            <div className="mt-3 flex items-start gap-2 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-700">
+              <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> {notice}
+            </div>
+          )}
+
+          <label className="mt-4 block">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+              New password
+            </span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              placeholder="At least 6 characters"
+              className="input-field"
+            />
+          </label>
+          <label className="mt-3 block">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Confirm password
+            </span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Repeat password"
+              className="input-field"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="mt-5 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 font-bold text-white shadow-glow transition active:scale-[.98] disabled:opacity-60"
+          >
+            {busy ? <Loader2 size={18} className="animate-spin" /> : <KeyRound size={18} />}
+            {busy ? 'Saving…' : 'Update password'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              cancelRecovery()
+              setNotice(null)
+              setError(null)
+            }}
+            className="mt-3 min-h-[44px] w-full text-xs font-bold text-emerald-700"
+          >
+            Back to sign in
+          </button>
+        </form>
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-slate-50 px-5 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-7 text-center">
           <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-[0_10px_34px_-8px_rgba(5,150,105,.25)]">
-            <Cat size={34} strokeWidth={2.4} />
+            <BarChart3 size={34} strokeWidth={2.4} />
           </span>
           <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-slate-900">Market Research</h1>
           <p className="mt-1 text-xs text-slate-600">Field sales &amp; market research</p>
@@ -102,6 +216,7 @@ export function AuthScreen() {
               : 'Set up email and password access for your team.'}
           </p>
 
+          {offlineBanner && <div className="mt-4">{offlineBanner}</div>}
           {error && (
             <div className="mt-4 flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-xs text-rose-700 ring-1 ring-inset ring-rose-200">
               <AlertCircle size={16} className="mt-0.5 shrink-0" />

@@ -24,13 +24,14 @@ With no Supabase credentials, Market Research runs fully offline-capable in **lo
    ```
 
 4. Create a user: open **Authentication → Users → Add user** in Supabase (email + password), or use the app's **Create account** screen.
-5. Restart `npm run dev` and sign in with that email and password. The **Data** tab will show `Supabase connected` and your account; all records are written directly to your database.
+5. In **Authentication → URL Configuration**, set the Site URL to your deployed URL (or `http://localhost:5173` for local dev) and add the same URL under **Redirect URLs**. This is required for email confirmation and password-reset links to return to the app.
+6. Restart `npm run dev` and sign in with that email and password. The **Data** tab will show `Supabase connected` and your account; all records are written directly to your database.
 
-> Row Level Security restricts every table to the `authenticated` role — anonymous requests cannot read or write data. The SQL is re-runnable and removes older open-anon policies if present.
+> Row Level Security restricts every table to the `authenticated` role — anonymous requests cannot read or write data. The SQL is re-runnable and removes older open-anon policies if present. All signed-in users currently share one workspace (no per-user row isolation); add `user_id` policies if you need separate accounts' data.
 
 ## Features
 
-- **Email/password auth** — Supabase Auth sign-in, sign-up, password reset and persistent sessions; RLS blocks anonymous access. Demo mode skips login.
+- **Email/password auth** — Supabase Auth sign-in, sign-up, email confirmation, full password-reset flow (request link → set new password in-app) and persistent sessions; RLS blocks anonymous access. Local IndexedDB mode skips login.
 - **Visits** — date-based sessions, active-visit selection, timeline and per-visit inquiry counts.
 - **Products** — target/min prices, status (`AVAILABLE` / `RESERVED` / `SOLD`), emoji or image icons, searchable-by-filter cards.
 - **Fast logger** — switch between **I'm selling** (buyer offers) and **I'm buying** (seller quotes); one-tap question chips, `+৳10 / +৳25 / +৳50 / +৳100` steppers, quick price presets, sentiment tagging and instant save.

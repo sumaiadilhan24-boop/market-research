@@ -3,10 +3,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 const url = (import.meta.env.VITE_SUPABASE_URL ?? '').trim()
 const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim()
 
-/** True only when both credentials are present. Otherwise the app uses demo mode. */
+/** True only when both credentials are present. Otherwise the app uses local IndexedDB mode. */
 export const isSupabaseConfigured = Boolean(url && anonKey)
 
-/** Null in demo mode — every call is guarded by the data service. */
+/** Null in local mode — every call is guarded by the data service. */
 export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(url, anonKey, {
       auth: {
@@ -20,7 +20,7 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 
 export function getSupabase(): SupabaseClient {
   if (!supabase) {
-    throw new Error('Supabase is not configured. Running in demo mode.')
+    throw new Error('Supabase is not configured. Running in local IndexedDB mode.')
   }
   return supabase
 }
